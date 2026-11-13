@@ -19,7 +19,10 @@ with its commit history. This repo is not an R package.
 - `rapid_data_processing.Rmd`: preprocesses large datasets (run once, or when
   the source data changes)
 - `rapid_workflow.Rmd`: calculates the indicators
-- `app_data_prep.Rmd`: prepares the indicators and writes them to the app repo
+- `app_data_prep.Rmd`: prepares the indicators and each supply's source-type
+  indicator weights, and writes them to the app repo
+- `weights/indicator_weights.csv`: the editable weights, one row per indicator
+  and one column per water source category
 - `src/`: the functions
   - `calc_*_exposure()` and `calc_*_sensitivity()`: the indicators
   - `process_*()`: prepare the input data that some indicators need

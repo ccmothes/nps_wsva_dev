@@ -26,7 +26,8 @@ are prepped and written. Every object written here lands in the app repo, `../np
 
 | Output | Contents |
 |-------------------------|-----------------------------------------------|
-| `final_indicators.csv` | One row per water supply, one column per indicator (raw values) |
+| `final_indicators.csv` | One row per water supply, one column per indicator (raw values). Also saved as `data/rapid/outputs/final_indicators_<date>.csv`. |
+| `supply_indicator_weights.csv` | One row per water supply: its source category and one `wt_<indicator>` weight (0-1) per indicator. Also saved as `data/rapid/outputs/supply_indicator_weights_<date>.csv`. |
 | `water_supplies.csv` | Water supply attributes + state water rights doctrine |
 | `wbm_data.gpkg` | LOCA2 climate change summary, spatialized |
 | `municipal_hauled.gpkg` | Municipal / hauled / tribal / purchased supplies |
@@ -34,6 +35,11 @@ are prepped and written. Every object written here lands in the app repo, `../np
 Indicator values are written as **raw** (un-normalized) values. The app
 re-normalizes and aggregates them on the fly via `calc_vulnerability_index()`,
 so normalization must stay out of this file.
+
+**Source-type weights:** section 3 also writes each supply's indicator weights
+(`supply_indicator_weights.csv`). The app applies them after normalizing, in
+`calc_vulnerability_index()`, so the indicator values written here stay raw and
+unweighted.
 
 **Index hierarchy (calculated in the app, not here):** Indicators to Vulnerability
 Factors to Components (Exposure / Sensitivity) to Total Vulnerability Index,
@@ -85,82 +91,106 @@ To add a new indicator:
 1.  Add a row below with the app-facing name, the raw column name in the output
     file, and the file stem.
 2.  Knit. The validation chunk reports anything that did not land.
-3.  Add a matching row to `app_data/indicator_details.csv` in `nps_wsva_app` (label,
+3.  Add a row to `weights/indicator_weights.csv` (skip for `_model_agree`
+    columns, which are confidence weights and are never source-type weighted).
+    The weights chunk in section 3 stops if a scored indicator has no row there.
+4.  Add a matching row to `app_data/indicator_details.csv` in `nps_wsva_app` (label,
     description, direction, status) and to `indicator_config` in `app.R`.
+
+The list below follows the Impact Pathways table in the Phase 1 revisions notes
+(Pathway > Component > Factor > Indicator).
 
 Conventions:
 
 -   `app_name` prefix is `exp_` (Exposure) or `sen_` (Sensitivity).
+-   Keep existing `app_name`s stable: the app's `calc_vulnerability_index()`
+    looks columns up by name and quietly treats a missing one as NA (or, for a
+    `_model_agree` column, as a weight of 1).
 -   `source_col` is always a `raw_` column. Do not register `norm_` columns.
 -   Model-agreement columns must be **fraction scale (0-1)**, not percent, or
     they will swamp the amount indicators during aggregation.
 -   For multi-metric outputs, pick the percentile that is most vulnerable:
     `p10` for runoff / precip / SWE / drought (largest decrease), `p90` for
     everything else (largest increase).
+-   Extreme precipitation and dry-spell indicators use **percent** change,
+    except the counts of very wet days (`pr99days`) and summer days (`su`),
+    which use the change in **days**: their historical baselines are near zero
+    in many places, so percent change blows up (up to ~1,000% or more).
 
 ```{r indicator-registry}
 indicator_registry <- tribble(
-  ~app_name,                              ~source_col,                                    ~file_stem,                            ~component,    ~factor,
+  ~app_name,                              ~source_col,                                     ~file_stem,                           ~pathway,          ~component,    ~factor,
 
-  # ---- EXPOSURE ------------------------------------------------------------
-  # Runoff
-  "exp_runoff_change",                    "raw_runoff_change_p10",                        "runoff_exposure",                     "Exposure",    "Runoff",
-  "exp_runoff_model_agree",               "raw_runoff_models_showing_decrease",           "runoff_exposure",                     "Exposure",    "Runoff",
-  "exp_runoff_timing_change",             "raw_runoff_timing_change_magnitude",           "runoff_timing_exposure",              "Exposure",    "Timing",
-  "exp_runoff_timing_change_model_agree", "raw_runoff_timing_direction_agreement_fraction","runoff_timing_exposure",             "Exposure",    "Timing",
+  # ---- WATER QUANTITY ------------------------------------------------------
+  # Exposure / Water Supply: % change in runoff/precip (runoff for most sources,
+  # precip for rainwater; the app picks the branch by source type)
+  "exp_runoff_change",                    "raw_runoff_change_p10",                         "runoff_exposure",                    "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_runoff_model_agree",               "raw_runoff_models_showing_decrease",            "runoff_exposure",                    "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_precip_change",                    "raw_precipitation_change_p10",                  "precipitation_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_precip_model_agree",               "raw_precip_models_showing_decrease",            "precipitation_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  # Exposure / Water Supply: projected change in runoff/precip timing
+  "exp_runoff_timing_change",             "raw_runoff_timing_change_magnitude",            "runoff_timing_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_runoff_timing_change_model_agree", "raw_runoff_timing_direction_agreement_fraction","runoff_timing_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_precip_timing_change",             "raw_precip_timing_change_magnitude",            "precip_timing_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  "exp_precip_timing_change_model_agree", "raw_precip_timing_direction_agreement_fraction","precip_timing_exposure",             "Water Quantity",  "Exposure",    "Water Supply",
+  # Exposure / Drought: change in SPEI (negative = drier = more vulnerable)
+  "exp_drought_change",                   "raw_spei_change_p10",                           "drought_exposure",                   "Water Quantity",  "Exposure",    "Drought",
+  "exp_drought_model_agree",              "raw_spei_models_showing_decrease",              "drought_exposure",                   "Water Quantity",  "Exposure",    "Drought",
+  # Sensitivity / Water Supply: historical trend in runoff/precip
+  "sen_runoff_trend",                     "raw_slope_runoff",                              "runoff_sensitivity",                 "Water Quantity",  "Sensitivity", "Water Supply",
+  "sen_precip_trend",                     "raw_slope_precip",                              "precip_sensitivity",                 "Water Quantity",  "Sensitivity", "Water Supply",
+  # Sensitivity / Drought: historical trend in SPEI
+  "sen_drought_trend",                    "raw_slope_spei",                                "drought_sensitivity",                "Water Quantity",  "Sensitivity", "Drought",
 
-  # Precipitation
-  "exp_precip_change",                    "raw_precipitation_change_p10",                 "precipitation_exposure",              "Exposure",    "Precipitation",
-  "exp_precip_model_agree",               "raw_precip_models_showing_decrease",           "precipitation_exposure",              "Exposure",    "Precipitation",
-  "exp_precip_timing_change",             "raw_precip_timing_change_magnitude",           "precip_timing_exposure",              "Exposure",    "Timing",
-  "exp_precip_timing_change_model_agree", "raw_precip_timing_direction_agreement_fraction","precip_timing_exposure",             "Exposure",    "Timing",
+  # ---- WATER DEMAND --------------------------------------------------------
+  # Exposure / Demand
+  "exp_nearby_use_change",                "raw_use_change_p90",                            "nearby_use_exposure",                "Water Demand",    "Exposure",    "Demand",
+  "exp_nearby_use_model_agree",           "raw_models_showing_increase_pct",               "nearby_use_exposure",                "Water Demand",    "Exposure",    "Demand",
+  "exp_auc_change",                       "raw_timing_change_p90",                         "timing_mismatch_exposure_Pred_High", "Water Demand",    "Exposure",    "Demand",
+  # Sensitivity / Demand. Nearby water use is now the current (average) use per
+  # km2, not the trend (Tyler's edits; the trend column is no longer written).
+  # The app name stays sen_competition so the app keeps finding it.
+  "sen_competition",                      "raw_avg_nearby_use_per_km2",                    "nearby_use_sensitivity",             "Water Demand",    "Sensitivity", "Demand",
+  "sen_auc_change",                       "raw_timing_mismatch_auc",                       "timing_mismatch_sensitivity",        "Water Demand",    "Sensitivity", "Demand",
+  "sen_visitation_trend",                 "raw_scaled_trend_visitation",                   "visitation_sensitivity",             "Water Demand",    "Sensitivity", "Demand",
 
-  # Temperature
-  "exp_temp_change",                      "raw_temperature_change_p90",                   "temperature_exposure",                "Exposure",    "Temperature",
+  # ---- FLOOD ---------------------------------------------------------------
+  # Exposure / Flood: extreme precipitation (LOCA2 extremes, written by the
+  # flood exposure calc to flood_exposure_<date>.csv)
+  "exp_extreme_precip_1day",              "raw_prmax1day_percent_change_p90",              "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  "exp_extreme_precip_1day_model_agree",  "raw_prmax1day_models_showing_increase",         "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  "exp_extreme_precip_5day",              "raw_prmax5day_percent_change_p90",              "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  "exp_extreme_precip_5day_model_agree",  "raw_prmax5day_models_showing_increase",         "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  "exp_extreme_precip_days",              "raw_pr99days_change_p90",                       "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  "exp_extreme_precip_days_model_agree",  "raw_pr99days_models_showing_increase",          "flood_exposure",                     "Flood",           "Exposure",    "Flood",
+  # Sensitivity / Flood: FEMA SFHA (100-yr flood)
+  "sen_flood_risk",                       "raw_flood_risk_percent",                        "flood_sensitivity",                  "Flood",           "Sensitivity", "Flood",
 
-  # Drought (negative SPEI change = drier = more vulnerable)
-  "exp_drought_change",                   "raw_spei_change_p10",                          "drought_exposure",                    "Exposure",    "Drought",
-  "exp_drought_model_agree",              "raw_spei_models_showing_decrease",             "drought_exposure",                    "Exposure",    "Drought",
+  # ---- WILDFIRE ------------------------------------------------------------
+  "exp_fire_prob_change",                 "raw_fire_prob_change_p90",                      "fire_exposure",                      "Wildfire",        "Exposure",    "Wildfire",
+  "exp_fire_model_agree",                 "raw_fire_models_showing_increase",              "fire_exposure",                      "Wildfire",        "Exposure",    "Wildfire",
+  "sen_wildfire_hazard",                  "raw_wildfire_hazard_mean",                      "fire_sensitivity",                   "Wildfire",        "Sensitivity", "Wildfire",
 
-  # Sea level rise
-  "exp_inundation_slr",                   "raw_pct_point_change",                         "inundation_exposure",                 "Exposure",    "Sea Level Rise",
-  "exp_swi",                              "raw_swi_migration",                            "swi_exposure",                        "Exposure",    "Sea Level Rise",
-  "exp_storm_surge",                      "raw_surge_change_max",                         "storm_surge_exposure",                "Exposure",    "Sea Level Rise",
+  # ---- COASTAL IMPACTS -----------------------------------------------------
+  "exp_inundation_slr",                   "raw_pct_point_change",                          "inundation_exposure",                "Coastal Impacts", "Exposure",    "Coastal Impacts",
+  "exp_storm_surge",                      "raw_surge_change_max",                          "storm_surge_exposure",               "Coastal Impacts", "Exposure",    "Coastal Impacts",
+  "exp_swi",                              "raw_swi_migration",                             "swi_exposure",                       "Coastal Impacts", "Exposure",    "Coastal Impacts",
+  "sen_inundation_current",               "raw_coverage_pct_ref",                          "inundation_exposure",                "Coastal Impacts", "Sensitivity", "Coastal Impacts",
 
-  # Fire
-  "exp_fire_prob_change",                 "raw_fire_prob_change_p90",                     "fire_exposure",                       "Exposure",    "Wildfire",
-  "exp_fire_model_agree",                 "raw_fire_models_showing_increase",             "fire_exposure",                       "Exposure",    "Wildfire",
-
-  # Demand
-  "exp_nearby_use_change",                "raw_use_change_p90",                           "nearby_use_exposure",                 "Exposure",    "Demand",
-  "exp_nearby_use_model_agree",           "raw_models_showing_increase_pct",              "nearby_use_exposure",                 "Exposure",    "Demand",
-  "exp_auc_change",                       "raw_timing_change_p90",                        "timing_mismatch_exposure_Pred_High",  "Exposure",    "Demand",
-
-  # ---- SENSITIVITY ---------------------------------------------------------
-  # Demand
-  "sen_visitation_trend",                 "raw_scaled_trend_visitation",                  "visitation_sensitivity",              "Sensitivity", "Demand",
-  "sen_competition",                      "raw_slope_nearby_use_per_km2",                 "nearby_use_sensitivity",              "Sensitivity", "Demand",
-  "sen_auc_change",                       "raw_timing_mismatch_auc",                      "timing_mismatch_sensitivity",         "Sensitivity", "Demand",
-
-  # Infrastructure
-  "sen_source_type",                      "raw_groundwater_depth_m",                      "groundwater_depth_sensitivity",       "Sensitivity", "Infrastructure",
-
-  # Hydro-climate trends
-  "sen_runoff_trend",                     "raw_slope_runoff",                             "runoff_sensitivity",                  "Sensitivity", "Runoff",
-  "sen_precip_trend",                     "raw_slope_precip",                             "precip_sensitivity",                  "Sensitivity", "Precipitation",
-  "sen_drought_trend",                    "raw_slope_spei",                               "drought_sensitivity",                 "Sensitivity", "Drought",
-  "sen_temp_trend",                       "raw_slope_temperature",                        "temperature_sensitivity",             "Sensitivity", "Temperature",
-
-  # Hazards
-  "sen_wildfire_hazard",                  "raw_wildfire_hazard_mean",                     "fire_sensitivity",                    "Sensitivity", "Wildfire",
-  "sen_flood_risk",                       "raw_flood_risk_percent",                       "flood_sensitivity",                   "Sensitivity", "Flood",
-  "sen_inundation_current",               "raw_coverage_pct_ref",                         "inundation_exposure",              "Sensitivity", "Sea Level Rise"
+  # ---- WATER QUALITY -------------------------------------------------------
+  # Exposure / Water Quality: change in extreme temperature days (summer days,
+  # Tmax > 25 C) and consecutive dry days
+  "exp_extreme_temp_days",                "raw_su_change_p90",                             "temp_threshold_exposure",            "Water Quality",   "Exposure",    "Water Quality",
+  "exp_extreme_temp_days_model_agree",    "raw_su_models_showing_increase",                "temp_threshold_exposure",            "Water Quality",   "Exposure",    "Water Quality",
+  "exp_dry_days",                         "raw_cdd_percent_change_p90",                    "dry_period_exposure",                "Water Quality",   "Exposure",    "Water Quality",
+  "exp_dry_days_model_agree",             "raw_cdd_change_models_showing_increase",        "dry_period_exposure",                "Water Quality",   "Exposure",    "Water Quality",
+  # Sensitivity / Water Quality
+  "sen_treatment_capacity",               "raw_treatment_capacity",                        "treatment_capacity_sensitivity",     "Water Quality",   "Sensitivity", "Water Quality"
 
   # ---- NOT YET WIRED (uncomment when the output exists) --------------------
   # NOTE: add a trailing comma to the row above before uncommenting any of these
-  # "exp_swe_change",       "raw_swe_change_p10",             "swe_exposure",    "Exposure", "Snowpack",
-  # "exp_swe_model_agree",  "raw_swe_models_showing_decrease","swe_exposure",    "Exposure", "Snowpack",
-  # "exp_flood_change",     "raw_flood_change_p90",           "flood_exposure",  "Exposure", "Flood",
+  # "exp_swe_change",       "raw_swe_change_p10",              "swe_exposure", "Water Quantity", "Exposure", "Water Supply",
+  # "exp_swe_model_agree",  "raw_swe_models_showing_decrease", "swe_exposure", "Water Quantity", "Exposure", "Water Supply",
 )
 
 # Guard against copy-paste duplicates in the registry itself
@@ -169,7 +199,7 @@ stopifnot(
   !anyDuplicated(indicator_registry$source_col)
 )
 
-count(indicator_registry, component, factor)
+count(indicator_registry, pathway, component, factor)
 ```
 
 # 2. Assemble indicators
@@ -288,7 +318,7 @@ indicators_clean |>
   summarise(across(-wsd_source_id, ~ sum(!is.na(.x)))) |>
   pivot_longer(everything(), names_to = "app_name", values_to = "n_valid") |>
   mutate(pct_valid = round(100 * n_valid / nrow(indicators_clean), 1)) |>
-  left_join(select(indicator_registry, app_name, component, factor), by = "app_name") |>
+  left_join(select(indicator_registry, app_name, pathway, component, factor), by = "app_name") |>
   arrange(n_valid) |>
   print(n = Inf)
 
@@ -303,8 +333,100 @@ indicators_clean |>
   print(n = Inf)
 ```
 
+Saved twice: a date-stamped copy in `data/rapid/outputs/`, so each run is kept,
+and the fixed-name copy the app reads (`app.R` and `deploy.R` refer to
+`final_indicators.csv` by name).
+
 ```{r write-indicators}
+write_csv(indicators_clean,
+          file.path(dir_out, paste0("final_indicators_", Sys.Date(), ".csv")))
 write_csv(indicators_clean, file.path(dir_app, "final_indicators.csv"))
+```
+
+## Source-type indicator weights
+
+Each indicator applies to some water source types more than others: 1 = the
+indicator fully applies to that source type, 0 = not at all. Two inputs:
+
+-   `weights/indicator_weights.csv`: **the table to edit.** One row per
+    indicator, one column per source category (`SWS` Streams & Rivers, `SWL`
+    Lakes & Reservoirs, `SGW_SP` Springs & Shallow Groundwater, `DGW` Deep
+    Groundwater, `RW` Rainwater, `O` Ocean).
+-   `indicator_weights_<date>.csv`: each supply's source category
+    (`weight_category`), written by `calc_indicator_weights()` in
+    `rapid_workflow.Rmd`.
+
+They are joined into one row per supply with a `wt_<indicator>` column per
+indicator. The app multiplies each normalized indicator by its weight
+(`normalized x model agreement x source-type weight`), so nothing is applied to
+the raw values here. Supplies with no source category get no row and are left
+unweighted by the app. To try other weights without knitting, use the Test
+weights tab of the Methods Explorer in `nps_wsva_app/prototypes`.
+
+```{r indicator-weights}
+category_codes <- c(
+  SWS    = "Streams & Rivers",
+  SWL    = "Lakes & Reservoirs",
+  SGW_SP = "Springs & Shallow Groundwater",
+  DGW    = "Deep Groundwater",
+  RW     = "Rainwater",
+  O      = "Ocean"
+)
+
+indicator_weights <- read_csv("weights/indicator_weights.csv", show_col_types = FALSE)
+
+category_file <- latest_file("indicator_weights")
+stopifnot(!is.na(category_file))
+cat("Source categories from:", basename(category_file), "\n")
+
+supply_categories <- read_csv(category_file, show_col_types = FALSE) |>
+  distinct(wsd_source_id, .keep_all = TRUE)
+
+# Every scored indicator needs a weights row (model-agreement columns are
+# confidence weights, not indicators), every weight must be 0-1, and every
+# category label must be one of the six above.
+scored <- setdiff(names(indicators_clean), "wsd_source_id") |>
+  str_subset("_model_agree$", negate = TRUE)
+weight_values <- as.matrix(indicator_weights[, names(category_codes)])
+
+stopifnot(
+  "Scored indicator(s) missing from weights/indicator_weights.csv" =
+    all(scored %in% indicator_weights$app_name),
+  "Duplicated app_name in weights/indicator_weights.csv" =
+    !anyDuplicated(indicator_weights$app_name),
+  "Weights must be numbers between 0 and 1" =
+    is.numeric(weight_values) && !anyNA(weight_values) &&
+    all(weight_values >= 0 & weight_values <= 1),
+  "Unknown weight_category label in the source category file" =
+    all(na.omit(supply_categories$weight_category) %in% category_codes)
+)
+setdiff(scored, indicator_weights$app_name)   # which ones, if the check above fails
+
+# One row per source category, one wt_ column per indicator
+category_weights <- indicator_weights |>
+  select(app_name, all_of(names(category_codes))) |>
+  pivot_longer(-app_name, names_to = "code", values_to = "weight") |>
+  mutate(weight_category = unname(category_codes[code])) |>
+  select(-code) |>
+  pivot_wider(names_from = app_name, values_from = weight, names_prefix = "wt_")
+
+supply_indicator_weights <- supply_categories |>
+  filter(!is.na(weight_category)) |>
+  select(wsd_source_id, weight_category) |>
+  left_join(category_weights, by = "weight_category")
+
+count(supply_indicator_weights, weight_category, sort = TRUE)
+
+# Supplies with indicators but no source category (left unweighted by the app)
+indicators_clean |>
+  filter(!wsd_source_id %in% supply_indicator_weights$wsd_source_id) |>
+  pull(wsd_source_id)
+```
+
+```{r write-indicator-weights}
+write_csv(supply_indicator_weights,
+          file.path(dir_out, paste0("supply_indicator_weights_", Sys.Date(), ".csv")))
+write_csv(supply_indicator_weights, file.path(dir_app, "supply_indicator_weights.csv"))
 ```
 
 # 4. Water supplies
