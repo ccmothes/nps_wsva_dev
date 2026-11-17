@@ -34,7 +34,8 @@ with its commit history. This repo is not an R package.
 ## Getting started
 
 Clone this repo next to `nps_wsva_app`. `app_data_prep.Rmd` writes to
-`../nps_wsva_app/app_data`. One Explore notebook reads from that folder and
+`../nps_wsva_app/prototypes/app_data` for now, so the deployed app's data is
+left as it is. One Explore notebook reads from `../nps_wsva_app/app_data` and
 sources the app's `calc_vulnerability_index.R`.
 
 The Rmds read their inputs from the shared WaVA data folder, which is not in

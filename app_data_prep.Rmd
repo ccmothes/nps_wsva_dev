@@ -22,7 +22,10 @@ options(tigris_use_cache = TRUE)
 # Overview
 
 This file is the single place where **all** datasets consumed by the rapid app
-are prepped and written. Every object written here lands in the app repo, `../nps_wsva_app/app_data/`.
+are prepped and written. Every object written here lands in the app repo. For
+now that is `../nps_wsva_app/prototypes/app_data/`, which the Methods Explorer
+reads, so the deployed app's `app_data/` is left as it is (see `dir_app` in
+section 0).
 
 | Output | Contents |
 |-------------------------|-----------------------------------------------|
@@ -37,9 +40,9 @@ re-normalizes and aggregates them on the fly via `calc_vulnerability_index()`,
 so normalization must stay out of this file.
 
 **Source-type weights:** section 3 also writes each supply's indicator weights
-(`supply_indicator_weights.csv`). The app applies them after normalizing, in
-`calc_vulnerability_index()`, so the indicator values written here stay raw and
-unweighted.
+(`supply_indicator_weights.csv`). They are applied after normalizing, so the
+indicator values written here stay raw and unweighted. Only the Methods
+Explorer prototype applies them; the deployed app does not.
 
 **Index hierarchy (calculated in the app, not here):** Indicators to Vulnerability
 Factors to Components (Exposure / Sensitivity) to Total Vulnerability Index,
@@ -51,7 +54,11 @@ following the Euclidean distance framework of
 ```{r paths-helpers}
 # All paths are relative to project root (set in the setup chunk)
 dir_out <- "data/rapid/outputs"   # date-stamped indicator outputs
-dir_app <- "../nps_wsva_app/app_data"   # what the app reads (a clone of nps_wsva_app next to this repo)
+# Where the outputs go, in a clone of nps_wsva_app next to this repo. For now
+# this is the prototypes' data folder, read by the Methods Explorer, so the
+# deployed app's data is left as it is. Switch to "../nps_wsva_app/app_data"
+# when the deployed app is ready for the updated indicators.
+dir_app <- "../nps_wsva_app/prototypes/app_data"
 dir_int <- "data/rapid"           # intermediate / archive products
 
 dir.create(dir_app, recursive = TRUE, showWarnings = FALSE)
@@ -357,10 +364,10 @@ indicator fully applies to that source type, 0 = not at all. Two inputs:
     `rapid_workflow.Rmd`.
 
 They are joined into one row per supply with a `wt_<indicator>` column per
-indicator. The app multiplies each normalized indicator by its weight
-(`normalized x model agreement x source-type weight`), so nothing is applied to
-the raw values here. Supplies with no source category get no row and are left
-unweighted by the app. To try other weights without knitting, use the Test
+indicator. The Methods Explorer multiplies each normalized indicator by its
+weight (`normalized x model agreement x source-type weight`), so nothing is
+applied to the raw values here. Supplies with no source category get no row and
+are left unweighted. The deployed app does not use this file. To try other weights without knitting, use the Test
 weights tab of the Methods Explorer in `nps_wsva_app/prototypes`.
 
 ```{r indicator-weights}
